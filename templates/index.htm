@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ऑटो वीडियो मेकर</title>
+<style>
+  body { font-family: sans-serif; background:#0f172a; color:#e2e8f0;
+         max-width:720px; margin:40px auto; padding:0 16px; }
+  h1 { text-align:center; }
+  input, select, button { width:100%; padding:14px; margin:8px 0;
+         border-radius:10px; border:none; font-size:16px; box-sizing:border-box; }
+  button { background:#6366f1; color:white; cursor:pointer; font-weight:bold; }
+  button:disabled { background:#475569; }
+  #status { margin:20px 0; font-size:18px; text-align:center; }
+  video { width:100%; border-radius:12px; margin-top:12px; }
+  .scene { background:#1e293b; padding:10px 14px; border-radius:8px; margin:8px 0; }
+</style>
+</head>
+<body>
+<h1>🎬 ऑटो वीडियो मेकर</h1>
+<input id="topic" placeholder="कोई भी टॉपिक लिखिए, जैसे: ब्लैक होल कैसे बनते हैं">
+<select id="scenes">
+  <option value="4">छोटा वीडियो (4 सीन)</option>
+  <option value="6" selected>मध्यम वीडियो (6 सीन)</option>
+  <option value="10">लंबा वीडियो (10 सीन)</option>
+</select>
+<button id="go" onclick="start()">वीडियो बनाओ</button>
+<div id="status"></div>
+<div id="result"></div>
+
+<script>
+async function start() {
+  const topic = document.getElementById('topic').value;
+  const scenes = document.getElementById('scenes').value;
+  const btn = document.getElementById('go');
+  btn.disabled = true;
+  document.getElementById('result').innerHTML = '';
+  const r = await fetch('/start', {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({topic, scenes})});
+  const d = await r.json();
+  if (d.error) { document.getElementById('status').innerText = d.error; btn.disabled=false; return; }
+  poll(d.job_id);
+}
+
+async function poll(id) {
+  const r = await fetch('/status/' + id);
+  const d = await r.json();
+  document.getElementById('status').innerText = d.message;
+  if (d.status === 'done') {
+    let html = '<video controls src="' + d.video + '"></video>';
+    d.script.forEach((s,i) => {
+      html += '<div class="scene"><b>सीन ' + (i+1) + ':</b> ' + s.narration + '</div>';
+    });
+    document.getElementById('result').innerHTML = html;
+    document.getElementById('go').disabled = false;
+  } else if (d.status === 'error') {
+    document.getElementById('go').disabled = false;
+  } else {
+    setTimeout(() => poll(id), 2000);
+  }
+}
+</script>
+</body>
+</html>
