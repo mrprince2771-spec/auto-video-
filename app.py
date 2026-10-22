@@ -4,10 +4,8 @@ import anthropic
 import edge_tts
 from moviepy.editor import (ImageClip, AudioFileClip, concatenate_videoclips)
 
-# ====== यहाँ अपनी keys डालिए ======
-ANTHROPIC_API_KEY = "यहाँ_अपनी_anthropic_key_डालें"
-PEXELS_API_KEY = "यहाँ_अपनी_pexels_key_डालें"
-# ==================================
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 
 VOICE = "hi-IN-MadhurNeural"   # महिला आवाज़ के लिए: hi-IN-SwaraNeural
 MODEL = "claude-sonnet-4-5"
@@ -117,4 +115,5 @@ def video(job_id):
 
 
 if __name__ == "__main__":
-    app.run(debug=False, port=5000)
+      app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
