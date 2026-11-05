@@ -1,51 +1,57 @@
 import os, json, uuid, asyncio, threading, requests
 from flask import Flask, render_template, request, jsonify, send_from_directory
-import anthropic
 import edge_tts
-from moviepy.editor import (ImageClip, AudioFileClip, concatenate_videoclips)
+from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "")
 
-VOICE = "hi-IN-MadhurNeural"   # महिला आवाज़ के लिए: hi-IN-SwaraNeural
-MODEL = "claude-sonnet-4-5"
+VOICE = "hi-IN-MadhurNeural"
+GEMINI_MODEL = "gemini-2.0-flash"
 
 app = Flask(__name__)
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 OUTPUT = "output"
 os.makedirs(OUTPUT, exist_ok=True)
-jobs = {}  # job_id -> {status, message, video}
+jobs = {}
 
 
 def write_script(topic, scenes_count):
-    prompt = f"""टॉपिक: {topic}
-
-इस टॉपिक पर {scenes_count} सीन का एक रोचक वीडियो स्क्रिप्ट हिंदी में लिखो।
-हर सीन में 2 से 3 छोटे वाक्यों की नैरेशन हो।
-सिर्फ़ JSON लौटाओ, इस रूप में:
-[{{"narration": "हिंदी नैरेशन", "search": "English keywords for stock photo"}}]
-JSON के अलावा कुछ और मत लिखो।"""
-    msg = client.messages.create(
-        model=MODEL, max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}])
-    text = msg.content[0].text.strip()
+    prompt = (
+        f"टॉपिक: {topic}\n\n"
+        f"इस टॉपिक पर {scenes_count} सीन का एक रोचक वीडियो स्क्रिप्ट हिंदी में लिखो। "
+        "हर सीन में 2 से 3 छोटे वाक्यों की नैरेशन हो। "
+        "सिर्फ़ JSON लौटाओ, इस रूप में: "
+        '[{"narration": "हिंदी नैरेशन", "search": "English keywords for stock photo"}] '
+        "JSON के अलावा कुछ और मत लिखो।"
+    )
+    url = ("https://generativelanguage.googleapis.com/v1beta/models/"
+           f"{GEMINI_MODEL}:generateContent")
+    r = requests.post(
+        url,
+        headers={"x-goog-api-key": GEMINI_API_KEY,
+                 "Content-Type": "application/json"},
+        json={"contents": [{"parts": [{"text": prompt}]}]},
+        timeout=90,
+    )
+    r.raise_for_status()
+    text = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     text = text.replace("```json", "").replace("```", "").strip()
     return json.loads(text)
 
 
 def fetch_image(query, path):
-    r = requests.get("https://api.pexels.com/v1/search",
-                     headers={"Authorization": PEXELS_API_KEY},
-                     params={"query": query, "per_page": 1, "orientation": "landscape"},
-                     timeout=30)
-    photos = r.json().get("photos", [])
-    if not photos:
-        r = requests.get("https://api.pexels.com/v1/search",
-                         headers={"Authorization": PEXELS_API_KEY},
-                         params={"query": "abstract background", "per_page": 1},
-                         timeout=30)
-        photos = r.json()["photos"]
-    url = photos[0]["src"]["large2x"]
+    def search(q):
+        r = requests.get(
+            "https://pixabay.com/api/",
+            params={"key": PIXABAY_API_KEY, "q": q, "image_type": "photo",
+                    "orientation": "horizontal", "per_page": 5,
+                    "safesearch": "true"},
+            timeout=30,
+        )
+        return r.json().get("hits", [])
+
+    hits = search(query) or search("nature")
+    url = hits[0]["largeImageURL"]
     with open(path, "wb") as f:
         f.write(requests.get(url, timeout=60).content)
 
@@ -71,17 +77,16 @@ def build_video(job_id, topic, scenes_count):
             asyncio.run(make_voice(sc["narration"], aud))
             audio = AudioFileClip(aud)
             clip = (ImageClip(img).set_duration(audio.duration + 0.4)
-                    .resize(height=720).set_audio(audio))
+                    .resize(height=480).set_audio(audio))
             clips.append(clip)
 
         jobs[job_id]["message"] = "सब कुछ जोड़कर वीडियो बन रहा है..."
         final = concatenate_videoclips(clips, method="compose")
         out = os.path.join(folder, "video.mp4")
-        final.write_videofile(out, fps=24, codec="libx264",
+        final.write_videofile(out, fps=15, codec="libx264",
                               audio_codec="aac", logger=None)
         jobs[job_id].update(status="done", message="वीडियो तैयार है!",
-                            video=f"/video/{job_id}",
-                            script=scenes)
+                            video=f"/video/{job_id}", script=scenes)
     except Exception as e:
         jobs[job_id].update(status="error", message=f"गड़बड़ हुई: {e}")
 
@@ -95,7 +100,7 @@ def home():
 def start():
     data = request.json
     topic = data.get("topic", "").strip()
-    scenes = int(data.get("scenes", 5))
+    scenes = int(data.get("scenes", 4))
     if not topic:
         return jsonify(error="टॉपिक खाली है"), 400
     job_id = uuid.uuid4().hex[:8]
@@ -115,5 +120,4 @@ def video(job_id):
 
 
 if __name__ == "__main__":
-      app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
